@@ -33,7 +33,7 @@ from storage_simulator import ThermalStorageBuffer
 from train_model import load_forecaster, load_sensor_data, predict_horizons
 
 TOL = 1e-6          # kW below which a flow counts as zero
-TIE_BREAK = 1e-6    # $/kWh nudge that keeps the LP from cycling energy through the tank
+TIE_BREAK = 1e-6    # TND/kWh nudge that keeps the LP from cycling energy through the tank
 
 
 @dataclass(frozen=True)
@@ -42,16 +42,16 @@ class PlantConfig:
 
     orc_thermal_capacity_kw: float = 150.0     # max heat input to the ORC evaporator (about 22 kWe)
     orc_efficiency: float = 0.15               # net electrical efficiency, kWh_e per kWh_th
-    gas_price_kwh: float = 0.045               # natural gas, $/kWh of fuel
+    gas_price_kwh: float = 0.135               # natural gas, TND/kWh of fuel ($0.045 at 3.0 TND/USD)
     boiler_efficiency: float = 0.90            # backup boiler, heat out / fuel in
     grid_co2_kg_kwh: float = 0.40              # grid emission factor, kg CO2 per kWh_e
     gas_co2_kg_kwh: float = 0.202              # natural gas emission factor, kg CO2 per kWh of fuel
-    peak_price_threshold: float = 0.22         # rule-based: price that opens a peak window
+    peak_price_threshold: float = 0.66         # rule-based: price (TND/kWh) that opens a peak window
     peak_discharge_reserve_soc: float = 0.40   # rule-based: SoC kept back for the facility at peak
 
     @property
     def heat_value_kwh(self) -> float:
-        """Dollars saved per kWh of heat delivered to the facility (boiler gas not burnt)."""
+        """TND saved per kWh of heat delivered to the facility (boiler gas not burnt)."""
         return self.gas_price_kwh / self.boiler_efficiency
 
 
@@ -404,9 +404,9 @@ def add_economics(flows: pd.DataFrame, config: PlantConfig, duration_h: float = 
     out["orc_power_kw"] = config.orc_efficiency * (out["to_orc_kw"] + out["storage_to_orc_kw"])
     recovered = out["to_facility_kw"] + out["storage_to_facility_kw"]
     out["gas_saved_kwh"] = recovered * duration_h / config.boiler_efficiency
-    out["gas_savings_usd"] = out["gas_saved_kwh"] * config.gas_price_kwh
-    out["orc_revenue_usd"] = out["orc_power_kw"] * duration_h * out["price"]
-    out["savings_usd"] = out["gas_savings_usd"] + out["orc_revenue_usd"]
+    out["gas_savings_tnd"] = out["gas_saved_kwh"] * config.gas_price_kwh
+    out["orc_revenue_tnd"] = out["orc_power_kw"] * duration_h * out["price"]
+    out["savings_tnd"] = out["gas_savings_tnd"] + out["orc_revenue_tnd"]
     out["co2_avoided_kg"] = (out["gas_saved_kwh"] * config.gas_co2_kg_kwh
                              + out["orc_power_kw"] * duration_h * config.grid_co2_kg_kwh)
     return out
@@ -467,9 +467,9 @@ def summarize(results: pd.DataFrame, duration_h: float = 1.0) -> dict[str, float
         "standing_loss_kwh": kwh("standing_loss_kw"),
         "bypass_kwh": bypass,
         "boiler_heat_kwh": kwh("boiler_kw"),
-        "gas_savings_usd": float(results["gas_savings_usd"].sum()),
-        "orc_revenue_usd": float(results["orc_revenue_usd"].sum()),
-        "total_savings_usd": float(results["savings_usd"].sum()),
+        "gas_savings_tnd": float(results["gas_savings_tnd"].sum()),
+        "orc_revenue_tnd": float(results["orc_revenue_tnd"].sum()),
+        "total_savings_tnd": float(results["savings_tnd"].sum()),
         "co2_avoided_kg": float(results["co2_avoided_kg"].sum()),
         "final_soc": float(results["soc"].iloc[-1]),
     }
@@ -506,14 +506,14 @@ def main() -> None:
             print(f"MPC: {dispatcher.solve_count} LP solves, {dispatcher.fallback_count} fallbacks")
     summaries["No storage (direct + ORC)"] = summarize(no_storage_baseline(window, cfg))
 
-    header = (f"{'Strategy':<28}{'Recaptured':>11}{'Rate':>7}{'Gas $':>9}{'ORC $':>8}{'Total $':>9}"
+    header = (f"{'Strategy':<28}{'Recaptured':>11}{'Rate':>7}{'Gas TND':>9}{'ORC TND':>8}{'Total TND':>10}"
               f"{'CO2 t':>8}{'Boiler MWh':>11}{'Bypass MWh':>11}{'End SoC':>8}")
     print(header)
     print("-" * len(header))
     for name, s in summaries.items():
         end_soc = f"{s['final_soc']:.0%}" if not np.isnan(s["final_soc"]) else "-"
         print(f"{name:<28}{s['heat_recaptured_kwh'] / 1000:>9.1f}MWh{s['recapture_rate']:>7.1%}"
-              f"{s['gas_savings_usd']:>9.0f}{s['orc_revenue_usd']:>8.0f}{s['total_savings_usd']:>9.0f}"
+              f"{s['gas_savings_tnd']:>9.0f}{s['orc_revenue_tnd']:>8.0f}{s['total_savings_tnd']:>10.0f}"
               f"{s['co2_avoided_kg'] / 1000:>8.2f}{s['boiler_heat_kwh'] / 1000:>11.1f}"
               f"{s['bypass_kwh'] / 1000:>11.2f}{end_soc:>8}")
     for name in logs:

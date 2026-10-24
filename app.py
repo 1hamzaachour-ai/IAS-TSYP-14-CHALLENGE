@@ -20,7 +20,7 @@ import streamlit as st
 
 import dataset_builder
 import train_model
-from dataset_builder import PRICE_RANGE, apply_load_override
+from dataset_builder import PRICE_RANGE, USD_TO_TND, apply_load_override
 from optimizer import (MPCDispatcher, PlantConfig, RuleBasedDispatcher, build_hourly_inputs,
                        no_storage_baseline, simulate, summarize)
 from storage_simulator import NITRATE_SALT_PCM, ThermalStorageBuffer
@@ -280,8 +280,6 @@ def importance_figure(importance: dict[str, float], t: dict, top: int = 10) -> g
 # Page
 # --------------------------------------------------------------------------------------
 def fmt_delta(value: float, unit: str) -> str:
-    if unit == "$":
-        return f"{'-' if value < 0 else '+'}${abs(value):,.0f}"
     return f"{value:+,.0f} {unit}"
 
 
@@ -289,11 +287,6 @@ def daily(series: pd.Series) -> list[float] | None:
     """Daily totals for a KPI sparkline (only when the window spans at least 3 days)."""
     totals = series.resample("1D").sum()
     return totals.round(1).tolist() if len(totals) >= 3 else None
-
-
-def esc(text: str) -> str:
-    """Escape dollar signs so Streamlit markdown does not render them as LaTeX math."""
-    return text.replace("$", "\\$")
 
 
 SHORT_NAMES = {MPC_NAME: "MPC optimizer", RULE_NAME: "Rule-based", BASE_NAME: "No storage"}
@@ -304,9 +297,9 @@ def comparison_table(summaries: dict[str, dict]) -> pd.DataFrame:
     rows = [
         ("Heat recaptured", lambda s: f"{s['heat_recaptured_kwh'] / 1000:,.1f} MWh"),
         ("Recapture rate", lambda s: f"{s['recapture_rate']:.1%}"),
-        ("Gas savings", lambda s: f"${s['gas_savings_usd']:,.0f}"),
-        ("ORC revenue", lambda s: f"${s['orc_revenue_usd']:,.0f}"),
-        ("Total savings", lambda s: f"${s['total_savings_usd']:,.0f}"),
+        ("Gas savings", lambda s: f"{s['gas_savings_tnd']:,.0f} TND"),
+        ("ORC revenue", lambda s: f"{s['orc_revenue_tnd']:,.0f} TND"),
+        ("Total savings", lambda s: f"{s['total_savings_tnd']:,.0f} TND"),
         ("CO2 avoided", lambda s: f"{s['co2_avoided_kg'] / 1000:,.2f} t"),
         ("Boiler heat still needed", lambda s: f"{s['boiler_heat_kwh'] / 1000:,.1f} MWh"),
         ("Heat bypassed", lambda s: f"{s['bypass_kwh'] / 1000:,.2f} MWh"),
@@ -353,9 +346,9 @@ def main() -> None:
                                   "are re-derived from the engine map, then re-forecast by the ML model.")
 
         st.subheader("Energy prices")
-        tariff = st.slider(esc("Grid tariff, off-peak to peak ($/kWh)"), 0.04, 0.60, (0.08, 0.28), step=0.01,
+        tariff = st.slider("Grid tariff, off-peak to peak (TND/kWh)", 0.12, 1.80, (0.24, 0.84), step=0.01,
                            format="%.2f", help="Rescales the time-of-use tariff of the dataset.")
-        gas_price = st.slider(esc("Natural gas price ($/kWh)"), 0.020, 0.120, 0.045, step=0.005, format="%.3f",
+        gas_price = st.slider("Natural gas price (TND/kWh)", 0.060, 0.360, 0.135, step=0.005, format="%.3f",
                               help="Fuel price of the backup boiler that recovered heat displaces.")
 
         with st.expander("Advanced plant parameters"):
@@ -391,11 +384,12 @@ def main() -> None:
               delta_description="vs no storage", border=True, chart_data=daily(res["q_in_kw"] - res["bypass_kw"]),
               chart_type="bar", help=f"Exhaust heat put to use instead of bypassed: {s['recapture_rate']:.1%} of "
                                      f"the {s['heat_available_kwh']:,.0f} kWh available.")
-    c2.metric("Financial savings", f"${s['total_savings_usd']:,.0f}",
-              fmt_delta(s["total_savings_usd"] - base["total_savings_usd"], "$"),
-              delta_description="vs no storage", border=True, chart_data=daily(res["savings_usd"]), chart_type="bar",
-              help=esc(f"Boiler gas avoided ${s['gas_savings_usd']:,.0f} + ORC electricity "
-                       f"${s['orc_revenue_usd']:,.0f}, compared with a plant without heat recovery."))
+    c2.metric("Financial savings", f"{s['total_savings_tnd']:,.0f} TND",
+              fmt_delta(s["total_savings_tnd"] - base["total_savings_tnd"], "TND"),
+              delta_description="vs no storage", border=True, chart_data=daily(res["savings_tnd"]), chart_type="bar",
+              help=f"Boiler gas avoided {s['gas_savings_tnd']:,.0f} TND + ORC electricity "
+                   f"{s['orc_revenue_tnd']:,.0f} TND, compared with a plant without heat recovery "
+                   "(Tunisian dinar).")
     c3.metric("CO2 emissions avoided", f"{s['co2_avoided_kg']:,.0f} kg",
               fmt_delta(s["co2_avoided_kg"] - base["co2_avoided_kg"], "kg"),
               delta_description="vs no storage", border=True, chart_data=daily(res["co2_avoided_kg"]),
@@ -439,14 +433,14 @@ def main() -> None:
         st.subheader("Strategy comparison")
         st.dataframe(comparison_table(summaries), hide_index=True, width="stretch")
         mpc, rule = summaries[MPC_NAME], summaries[RULE_NAME]
-        edge = mpc["total_savings_usd"] - rule["total_savings_usd"]
-        st.caption(esc(
+        edge = mpc["total_savings_tnd"] - rule["total_savings_tnd"]
+        st.caption(
             "Savings are measured against a plant without heat recovery. The no-storage case is dispatched "
             "optimally hour by hour, so it is the bar the storage has to clear: with the selected strategy the "
-            f"storage adds **{fmt_delta(s['total_savings_usd'] - base['total_savings_usd'], '$')}**. "
-            f"MPC vs rule-based: **{fmt_delta(edge, '$')}** ({edge / rule['total_savings_usd']:+.1%}). Both start "
+            f"storage adds **{fmt_delta(s['total_savings_tnd'] - base['total_savings_tnd'], 'TND')}**. "
+            f"MPC vs rule-based: **{fmt_delta(edge, 'TND')}** ({edge / rule['total_savings_tnd']:+.1%}). Both start "
             f"at {initial_soc:.0%} SoC but can end at different levels, so check the last row too."
-        ))
+        )
 
     # ---------------------------------------------------------------- decision log
     st.subheader(f"Hourly dispatch decisions · {day:%a %d %b}")
@@ -465,7 +459,7 @@ def main() -> None:
         "soc": st.column_config.ProgressColumn("SoC (end)", min_value=0, max_value=100, format="%.0f%%",
                                                width="small"),
         "q_forecast_kw": kw("Q_in forecast"), "q_in_kw": kw("Q_in actual"), "demand_kw": kw("Demand"),
-        "price": st.column_config.NumberColumn("$/kWh", format="%.3f", width="small"),
+        "price": st.column_config.NumberColumn("TND/kWh", format="%.3f", width="small"),
         "to_facility_kw": kw("→ Facility"), "to_orc_kw": kw("→ ORC"), "to_storage_kw": kw("→ Storage"),
         "storage_to_facility_kw": kw("Storage → fac."), "storage_to_orc_kw": kw("Storage → ORC"),
         "bypass_kw": kw("Bypass"), "boiler_kw": kw("Boiler"),
@@ -501,16 +495,17 @@ def main() -> None:
 
     with st.expander("Plant model and assumptions"):
         spec = tank.describe()
-        st.markdown(esc(
+        st.markdown(
             f"""
 - **Waste heat**: Q_in = m_dot · Cp · (T_exhaust − T_ambient), Cp = {bundle['cp_exhaust_kj_kgk']:.2f} kJ/(kg·K). It is referenced to ambient as specified, so it is an upper bound; acid-dew-point limits would put the reference near 120–150 °C.
 - **PCM storage**: {spec['medium']}, melting at {NITRATE_SALT_PCM.t_melt_c:.0f} °C, 70 % latent share; {spec['capacity_kwh']:,.0f} kWh nominal, SoC window {spec['soc_window'][0]:.0%}–{spec['soc_window'][1]:.0%} ({spec['usable_kwh']:,.0f} kWh usable); 90 % charge and 90 % discharge efficiency; ±{spec['max_charge_kw']:,.0f} kW heat-exchanger rating; U·A = {spec['ua_w_per_k']:.1f} W/K ({spec['surface_area_m2']:.0f} m², scaled with capacity^(2/3)).
 - **ORC**: {cfg.orc_thermal_capacity_kw:.0f} kW_th evaporator, {cfg.orc_efficiency:.0%} net electrical efficiency, electricity valued at the grid price.
-- **Backup boiler**: {cfg.boiler_efficiency:.0%} efficient on natural gas at ${cfg.gas_price_kwh:.3f}/kWh, so every kWh of recovered heat delivered to the facility saves ${cfg.heat_value_kwh:.3f}.
+- **Backup boiler**: {cfg.boiler_efficiency:.0%} efficient on natural gas at {cfg.gas_price_kwh:.3f} TND/kWh, so every kWh of recovered heat delivered to the facility saves {cfg.heat_value_kwh:.3f} TND.
+- **Currency**: all money is in Tunisian dinar (TND). The specified grid tariff range of 0.08–0.28 USD/kWh is converted at {USD_TO_TND:.1f} TND/USD (Banque Centrale de Tunisie, October 2026), giving {PRICE_RANGE[0]:.2f}–{PRICE_RANGE[1]:.2f} TND/kWh.
 - **CO2**: gas {cfg.gas_co2_kg_kwh} kg/kWh_fuel, grid {cfg.grid_co2_kg_kwh} kg/kWh_e.
-- **Dispatch**: hourly. MPC = LP (SciPy HiGHS) over {horizon_h} h using the 1 h forecast for the next hour, the 4 h forecast for hours 2–4 and a day-type profile beyond. Rule-based = facility first (ORC first when power is worth more than the gas it displaces), surplus to the ORC above ${cfg.peak_price_threshold:.3f}/kWh and to storage otherwise, storage covers deficits and feeds the ORC at peak above {cfg.peak_discharge_reserve_soc:.0%} SoC.
+- **Dispatch**: hourly. MPC = LP (SciPy HiGHS) over {horizon_h} h using the 1 h forecast for the next hour, the 4 h forecast for hours 2–4 and a day-type profile beyond. Rule-based = facility first (ORC first when power is worth more than the gas it displaces), surplus to the ORC above {cfg.peak_price_threshold:.3f} TND/kWh and to storage otherwise, storage covers deficits and feeds the ORC at peak above {cfg.peak_discharge_reserve_soc:.0%} SoC.
 """
-        ))
+        )
 
 
 main()

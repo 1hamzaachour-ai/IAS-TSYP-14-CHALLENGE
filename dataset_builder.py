@@ -14,7 +14,7 @@ Columns written to factory_sensor_data.csv
     exhaust_temp_c               300 - 520 C
     exhaust_flow_kg_h            500 - 2500 kg/h
     ambient_temp_c               10 - 35 C
-    grid_electricity_price_kwh   0.08 - 0.28 $/kWh (time-of-use tariff)
+    grid_electricity_price_kwh   0.24 - 0.84 TND/kWh (time-of-use tariff; $0.08-0.28 at 3.0 TND/USD)
     facility_heat_demand_kw      100 - 800 kW
     q_in_kw                      ground-truth waste heat output (kW)
 
@@ -43,7 +43,8 @@ RPM_RANGE = (800.0, 3000.0)         # rpm
 FLOW_RANGE = (500.0, 2500.0)        # kg/h
 EXHAUST_TEMP_RANGE = (300.0, 520.0) # C
 AMBIENT_RANGE = (10.0, 35.0)        # C
-PRICE_RANGE = (0.08, 0.28)          # $/kWh
+USD_TO_TND = 3.0                    # Banque Centrale de Tunisie rate, October 2026
+PRICE_RANGE = (0.08 * USD_TO_TND, 0.28 * USD_TO_TND)  # TND/kWh (spec: $0.08 - 0.28/kWh)
 DEMAND_RANGE = (100.0, 800.0)       # kW
 
 ENGINE_COLUMNS = ["engine_rpm", "exhaust_flow_kg_h", "exhaust_temp_c"]
@@ -69,7 +70,7 @@ _PROCESS_HEAT_KNOTS = {
     2: ([0.0, 24.0], [5, 5]),
 }
 
-# Time-of-use tariff ($/kWh) by hour-of-day bands
+# Time-of-use tariff by hour-of-day bands, in $/kWh (converted to TND in grid_price)
 _WEEKDAY_TARIFF = ([7, 9, 17, 21, 22], [0.085, 0.190, 0.145, 0.255, 0.150], 0.085)
 _WEEKEND_TARIFF = ([8, 17, 21], [0.080, 0.110, 0.175], 0.080)
 
@@ -232,10 +233,10 @@ def grid_price(index: pd.DatetimeIndex, rng: np.random.Generator) -> np.ndarray:
         limits, prices, default = bands
         return np.select([hour < h for h in limits], prices, default)
 
-    base = np.where(weekday, tariff(_WEEKDAY_TARIFF), tariff(_WEEKEND_TARIFF))
+    base = np.where(weekday, tariff(_WEEKDAY_TARIFF), tariff(_WEEKEND_TARIFF)) * USD_TO_TND
     days = _day_number(index)
     market = rng.normal(1.0, 0.035, days.max() + 1)[days]
-    price = base * market + rng.normal(0.0, 0.003, len(index))
+    price = base * market + rng.normal(0.0, 0.003 * USD_TO_TND, len(index))
     return np.clip(price, *PRICE_RANGE)
 
 
