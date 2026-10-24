@@ -1,5 +1,9 @@
 # Waste Heat Recovery & Thermal Storage Optimizer
 
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://ias-tsyp-14-challenge-q9ttpfky7ydxmmjudhu5qs.streamlit.app)
+
+**Live demo:** <https://ias-tsyp-14-challenge-q9ttpfky7ydxmmjudhu5qs.streamlit.app>
+
 End-to-end ML + optimization project for an industrial engine's exhaust **waste heat recovery (WHR)** plant: a LightGBM model forecasts the recoverable heat 1 h and 4 h ahead, a PCM thermal storage model tracks the state of charge, a receding-horizon linear programme (SciPy / HiGHS) routes the heat every hour, and a Streamlit dashboard lets you change storage size, engine load and energy prices and see the result immediately.
 
 All money is in **Tunisian dinar (TND)**.
