@@ -1,0 +1,16 @@
+[server]
+# Skip the first-run email prompt so the one-click launcher never waits for input
+showEmailPrompt = false
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
+
+# Accent colour for both modes; the app keeps following the viewer's light/dark setting
+[theme.light]
+primaryColor = "#2a78d6"
+
+[theme.dark]
+primaryColor = "#3987e5"
